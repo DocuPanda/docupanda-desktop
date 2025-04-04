@@ -31,7 +31,7 @@ jobs:
           Move-Item dist/main.exe dist/DocuPanda_Windows.exe
 
       - name: Upload Windows Artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: DocuPanda_Windows
           path: dist/DocuPanda_Windows.exe
@@ -59,7 +59,7 @@ jobs:
           chmod +x dist/DocuPanda_macOS
 
       - name: Upload macOS Artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: DocuPanda_macOS
           path: dist/DocuPanda_macOS
@@ -71,19 +71,19 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Download Windows Artifact
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: DocuPanda_Windows
           path: release_assets/
 
       - name: Download macOS Artifact
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: DocuPanda_macOS
           path: release_assets/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v4
         with:
           draft: false
           prerelease: false
