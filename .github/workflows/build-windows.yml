@@ -1,34 +1,92 @@
-name: Build Windows Executable
+name: Build & Release DocuPanda
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*.*.*'  # Trigger workflow on tags like v1.0.0
   workflow_dispatch:
 
 jobs:
   build-windows:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           pip install --upgrade pip
           pip install pyinstaller flet
 
-      - name: Build executable
+      - name: Build Windows Executable
         run: pyinstaller --onefile --windowed main.py
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Rename Windows Artifact
+        run: |
+          Move-Item dist/main.exe dist/DocuPanda_Windows.exe
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v2
         with:
-          name: windows-executable
-          path: dist/main.exe
+          name: DocuPanda_Windows
+          path: dist/DocuPanda_Windows.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyinstaller flet
+
+      - name: Build macOS Executable
+        run: pyinstaller --onefile --windowed main.py
+
+      - name: Rename macOS Artifact
+        run: |
+          mv dist/main dist/DocuPanda_macOS
+          chmod +x dist/DocuPanda_macOS
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: DocuPanda_macOS
+          path: dist/DocuPanda_macOS
+
+  create-release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: DocuPanda_Windows
+          path: release_assets/
+
+      - name: Download macOS Artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: DocuPanda_macOS
+          path: release_assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          files: |
+            release_assets/DocuPanda_Windows.exe
+            release_assets/DocuPanda_macOS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
