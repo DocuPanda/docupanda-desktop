@@ -2,8 +2,10 @@ name: Build & Release DocuPanda
 
 on:
   push:
+    branches:
+      - main
     tags:
-      - 'v*.*.*'  # Trigger workflow on tags like v1.0.0
+      - 'v*.*.*'
   workflow_dispatch:
 
 jobs:
