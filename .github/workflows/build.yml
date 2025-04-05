@@ -13,29 +13,19 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: Install Dependencies
-        run: |
+      - run: |
           pip install --upgrade pip
           pip install flet
-
-      - name: Build Windows App
-        env:
-          PYTHONUTF8: '1'
-        run: |
+      - run: |
           chcp 65001
           flet build windows
-
-      - name: Zip Windows App
-        run: |
-          Compress-Archive -Path build\windows\* -DestinationPath DocuPanda_Windows.zip
-
-      - name: Upload Windows Artifact
-        uses: actions/upload-artifact@v4
+        env:
+          PYTHONUTF8: '1'
+      - run: Compress-Archive -Path build\windows\* -DestinationPath DocuPanda_Windows.zip
+      - uses: actions/upload-artifact@v4
         with:
           name: DocuPanda_Windows
           path: DocuPanda_Windows.zip
@@ -44,56 +34,54 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: Install Dependencies
-        run: |
+      - run: |
           pip install --upgrade pip
           pip install flet
-
-      - name: Build macOS App
-        run: |
-          flet build macos
-
-      - name: Zip macOS App
-        run: |
+      - run: flet build macos
+      - run: |
           cd build/macos
           zip -r ../../DocuPanda_macOS.zip *.app
           cd ../..
-
-      - name: Upload macOS Artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: DocuPanda_macOS
           path: DocuPanda_macOS.zip
 
   create-release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [ build-windows, build-macos ]
+    needs: [build-windows, build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download Windows Artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: DocuPanda_Windows
           path: release_assets/
 
-      - name: Download macOS Artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: DocuPanda_macOS
           path: release_assets/
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Set Release Tag
+        id: tag
+        run: |
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "RELEASE_TAG=latest" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - uses: softprops/action-gh-release@v2
         with:
           draft: false
           prerelease: false
+          tag_name: ${{ steps.tag.outputs.RELEASE_TAG }}
+          name: "DocuPanda ${{ steps.tag.outputs.RELEASE_TAG }}"
           files: |
             release_assets/DocuPanda_Windows.zip
             release_assets/DocuPanda_macOS.zip
