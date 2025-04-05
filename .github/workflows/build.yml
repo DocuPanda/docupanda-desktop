@@ -71,7 +71,8 @@ jobs:
           path: DocuPanda_macOS.zip
 
   create-release:
-    needs: [build-windows, build-macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [ build-windows, build-macos ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
