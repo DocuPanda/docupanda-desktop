@@ -24,7 +24,10 @@ jobs:
           pip install flet
 
       - name: Build Windows App
+        env:
+          PYTHONUTF8: '1'
         run: |
+          chcp 65001
           flet build windows
 
       - name: Zip Windows App
