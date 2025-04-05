@@ -22,7 +22,7 @@ compile.app = true
 compile.packages = true
 compile.cleanup = true
 
-app.path = "."
+app.path = "src"
 app.module = "main"
 
 [tool.flet.splash]
