@@ -1,5 +1,5 @@
 [project]
-name = "my_app"
+name = "DocuPanda"
 version = "0.1.0"
 description = "My Flet app"
 readme = "README.md"
