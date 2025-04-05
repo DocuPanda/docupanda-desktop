@@ -1,4 +1,3 @@
-
 import base64
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,7 +24,7 @@ def upload_files(
     """
 
     files = list(folder_path.rglob('*.*'))
-    allowed_set = {'.pdf', '.jpg', '.jpeg', '.png', '.txt'}
+    allowed_set = {'.pdf', '.jpg', '.jpeg', '.png', '.txt', '.tiff', '.webp'}
     files = [f for f in files if f.suffix.lower() in allowed_set]
 
     total_files = len(files)

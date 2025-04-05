@@ -59,14 +59,6 @@ def main(page: ft.Page):
     page.padding = 20
 
     # --------------------------------------------------------------------
-    #  Load stored API key & schemas
-    # --------------------------------------------------------------------
-    stored_api_key = load_api_key()
-    schemas = []
-    if stored_api_key:
-        schemas = list_schemas(stored_api_key)  # returns a list of Schema objects
-
-    # --------------------------------------------------------------------
     #  Helper to show a snackbar
     # --------------------------------------------------------------------
     def show_snackbar(message: str):
@@ -129,7 +121,7 @@ def main(page: ft.Page):
     # --------------------------------------------------------------------
     #  config_view: For entering/saving the API key
     # --------------------------------------------------------------------
-    api_key_input = ft.TextField(label="API Key", width=300, value=stored_api_key)
+    api_key_input = ft.TextField(label="API Key", width=300, value=load_api_key())
 
     def save_api_key_click(e):
         api_key = api_key_input.value.strip()
@@ -315,7 +307,7 @@ def main(page: ft.Page):
             page.update()
 
             download_dataset(
-                api_key=stored_api_key,
+                api_key=get_latest_api_key(),
                 dataset_name=selected_dataset,
                 output_dir=chosen_folder_path,
                 progress_callback=progress_callback_download,
@@ -329,7 +321,7 @@ def main(page: ft.Page):
         page.close(dialog)
 
     def open_download_dialog(e):
-        dataset_names = list_dataset_names(stored_api_key)
+        dataset_names = list_dataset_names(get_latest_api_key())
         dataset_dropdown.options = [ft.dropdown.Option(name, name) for name in dataset_names]
         dataset_dropdown.value = ""
         folder_text_field.value = ""
@@ -360,7 +352,6 @@ def main(page: ft.Page):
         text="Download Dataset Results",
         on_click=open_download_dialog
     )
-
 
     file_picker = ft.FilePicker(on_result=pick_folder_result)
     page.overlay.append(file_picker)
@@ -398,7 +389,7 @@ def main(page: ft.Page):
             main_view.visible = False
         page.update()
 
-    if stored_api_key:
+    if load_api_key():
         show_main_view()
     else:
         config_view.visible = True
