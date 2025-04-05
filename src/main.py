@@ -165,7 +165,7 @@ def main(page: ft.Page):
 
     def progress_callback_upload(files_processed, total_files):
         progress_bar.value = files_processed / total_files
-        progress_text.value += f"\nUploading {files_processed} of {total_files} files..."
+        progress_text.value = f"Uploading {files_processed} of {total_files} files..."
         show_progress_ui()
         page.update()
 
@@ -185,7 +185,7 @@ def main(page: ft.Page):
 
     def progress_callback_download(files_processed, total_files):
         progress_bar.value = files_processed / total_files
-        progress_text.value += f"\nDownloading {files_processed} of {total_files} documents..."
+        progress_text.value = f"Downloading {files_processed} of {total_files} documents..."
         show_progress_ui()
         page.update()
 
@@ -457,6 +457,7 @@ def main(page: ft.Page):
             progress_container,  # The scrollable progress area
             logs_link,           # Button to open local log file (shown on error)
         ],
+        spacing=40,
         alignment="center",
         visible=False,
     )
