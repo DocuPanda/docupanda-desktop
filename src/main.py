@@ -1,7 +1,10 @@
-import json
+import sys
 import os
+import json
+import logging
 import platform
 import threading
+from datetime import datetime
 from pathlib import Path
 
 import flet as ft
@@ -13,10 +16,9 @@ from dp_desktop.upload import upload_files
 APP_NAME = "DocuPanda"
 
 
-def get_latest_api_key():
-    key = load_api_key()
-    return key.strip() if key else ""
-
+###############################################################################
+# 1. SET UP A NEW LOGFILE EACH RUN, CAPTURE PRINTS AND UNCAUGHT EXCEPTIONS
+###############################################################################
 
 def get_config_dir(app_name: str):
     system = platform.system()
@@ -24,14 +26,60 @@ def get_config_dir(app_name: str):
         return Path.home() / "Library" / "Application Support" / app_name
     elif system == "Windows":
         return Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / app_name
-    else:  # Linux and others
+    else:  # Linux or others
         return Path.home() / f".{app_name.lower()}"
 
 
 CONFIG_DIR = get_config_dir(APP_NAME)
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-CONFIG_FILE = CONFIG_DIR / "config.json"
 
+# Create a dedicated logs folder
+LOGS_DIR = CONFIG_DIR / "logs"
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Generate a new logfile name each run
+timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+log_file = LOGS_DIR / f"{APP_NAME.lower()}_{timestamp_str}.log"
+
+# Configure logging to both file and console
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.FileHandler(log_file, mode='w', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+
+# Ensure uncaught exceptions get logged at CRITICAL level
+def handle_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    logging.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+sys.excepthook = handle_exception
+
+# Optionally, redirect all print statements to logging as well
+class PrintToLogger(object):
+    def __init__(self, level=logging.INFO):
+        self._level = level
+    def write(self, message):
+        if message.strip():
+            logging.log(self._level, message.strip())
+    def flush(self):
+        pass
+
+sys.stdout = PrintToLogger(logging.INFO)
+sys.stderr = PrintToLogger(logging.ERROR)
+
+
+###############################################################################
+# 2. STANDARD APP CODE
+###############################################################################
+
+CONFIG_FILE = CONFIG_DIR / "config.json"
 
 def load_api_key():
     """Load the API key from our standard config file."""
@@ -41,15 +89,18 @@ def load_api_key():
                 config = json.load(f)
                 return config.get("api_key", "")
         except Exception as e:
-            print("Error loading config:", e)
+            print("Error loading config:", e)  # Will go to logs
     return ""
-
 
 def save_api_key(api_key):
     """Save the API key to our standard config file."""
     config = {"api_key": api_key}
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f)
+
+def get_latest_api_key():
+    key = load_api_key()
+    return key.strip() if key else ""
 
 
 def main(page: ft.Page):
@@ -98,7 +149,6 @@ def main(page: ft.Page):
         show_progress_ui()
 
     def handle_upload_error(file_path, error_msg):
-        # Append some note to progress_text (or show_snackbar)
         progress_text.value += f"\nError uploading {file_path.name}: {error_msg}"
         page.update()
 
@@ -178,7 +228,7 @@ def main(page: ft.Page):
     dataset_name_field = ft.TextField(label="Dataset Name", width=300)
     schema_dropdown = ft.Dropdown(
         label="Optional: choose a schema",
-        options=[],  # Initially empty
+        options=[],  # Initially empty, loaded dynamically
         width=300,
     )
 
@@ -224,7 +274,7 @@ def main(page: ft.Page):
                     dataset_name_field,
                     ft.Text("Optionally, standardize each document with a schema below:"),
                     schema_dropdown,
-                    ft.ProgressRing(visible=True),  # indicator while fetching
+                    ft.ProgressRing(visible=True),  # indicates we are fetching
                 ],
                 spacing=10,
             ),
@@ -236,14 +286,13 @@ def main(page: ft.Page):
         )
         page.open(dlg)
 
-        # Fetch schemas dynamically here:
         def fetch_schemas():
             latest_key = get_latest_api_key()
             schemas_fetched = list_schemas(latest_key)
             schema_dropdown.options = [
                 ft.dropdown.Option(key=s.schemaId, text=s.schemaName) for s in schemas_fetched
             ]
-            schema_dropdown.visible = True  # make dropdown visible after fetching
+            schema_dropdown.visible = True
             dlg.content.controls.pop()  # remove spinner
             page.update()
 
@@ -400,5 +449,4 @@ def main(page: ft.Page):
 # IMPORTANT: Provide both assets_dir and icon to ensure the icon is visible.
 ft.app(
     target=main,
-
 )
