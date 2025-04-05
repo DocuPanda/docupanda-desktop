@@ -89,7 +89,7 @@ def load_api_key():
                 config = json.load(f)
                 return config.get("api_key", "")
         except Exception as e:
-            print("Error loading config:", e)  # Will go to logs
+            print("Error loading config:", e)  # Goes to logs
     return ""
 
 def save_api_key(api_key):
@@ -118,54 +118,81 @@ def main(page: ft.Page):
         page.update()
 
     # --------------------------------------------------------------------
-    #  Shared UI elements (spinner, progress bar, progress text)
+    #  PROGRESS / STATUS TEXT, WRAPPED IN A SCROLLABLE CONTAINER
+    # --------------------------------------------------------------------
+    progress_text = ft.Text("", selectable=True)
+    progress_container = ft.Container(
+        content=progress_text,
+        width=600,
+        height=200,
+    )
+
+    def clear_progress_text():
+        progress_text.value = ""
+        logs_link.visible = False
+        page.update()
+
+    # This link becomes visible only on error and opens the local log file
+    logs_link = ft.TextButton(
+        text="View log file",
+        visible=False,
+        on_click=lambda e: page.launch_url(f"file://{log_file}")
+    )
+
+    # --------------------------------------------------------------------
+    #  Spinner + Progress Bar
     # --------------------------------------------------------------------
     loading_indicator = ft.ProgressRing(visible=False)
     progress_bar = ft.ProgressBar(width=400, visible=False)
-    progress_text = ft.Text("", visible=False)
 
     def show_progress_ui():
         loading_indicator.visible = True
         progress_bar.visible = True
-        progress_text.visible = True
         page.update()
 
     def hide_progress_ui():
         loading_indicator.visible = False
         progress_bar.visible = False
-        progress_text.visible = False
         page.update()
 
     # --------------------------------------------------------------------
     #  UPLOAD finishing/progress/error
     # --------------------------------------------------------------------
     def finish_upload():
-        progress_text.value += " Upload complete!"
+        progress_text.value += "\nUpload complete!"
         hide_progress_ui()
+        page.update()
 
     def progress_callback_upload(files_processed, total_files):
         progress_bar.value = files_processed / total_files
-        progress_text.value = f"Uploading {files_processed} of {total_files} files..."
+        progress_text.value += f"\nUploading {files_processed} of {total_files} files..."
         show_progress_ui()
+        page.update()
 
     def handle_upload_error(file_path, error_msg):
         progress_text.value += f"\nError uploading {file_path.name}: {error_msg}"
+        progress_text.value += f"\nCheck logs here: {log_file}\nPlease share logs with DocuPanda support if needed."
+        logs_link.visible = True
         page.update()
 
     # --------------------------------------------------------------------
     #  DOWNLOAD finishing/progress/error
     # --------------------------------------------------------------------
     def finish_download():
-        progress_text.value += " Download complete!"
+        progress_text.value += "\nDownload complete!"
         hide_progress_ui()
+        page.update()
 
     def progress_callback_download(files_processed, total_files):
         progress_bar.value = files_processed / total_files
-        progress_text.value = f"Downloading {files_processed} of {total_files} documents..."
+        progress_text.value += f"\nDownloading {files_processed} of {total_files} documents..."
         show_progress_ui()
+        page.update()
 
     def handle_download_error(doc_id_or_path, error_msg):
         progress_text.value += f"\nError downloading {doc_id_or_path}: {error_msg}"
+        progress_text.value += f"\nCheck logs here: {log_file}\nPlease share logs with DocuPanda support if needed."
+        logs_link.visible = True
         page.update()
 
     # --------------------------------------------------------------------
@@ -228,7 +255,7 @@ def main(page: ft.Page):
     dataset_name_field = ft.TextField(label="Dataset Name", width=300)
     schema_dropdown = ft.Dropdown(
         label="Optional: choose a schema",
-        options=[],  # Initially empty, loaded dynamically
+        options=[],
         width=300,
     )
 
@@ -242,7 +269,7 @@ def main(page: ft.Page):
 
         def do_upload():
             show_progress_ui()
-            progress_text.value = "Preparing upload..."
+            progress_text.value += "\nStarting upload..."
             page.update()
 
             upload_files(
@@ -260,8 +287,8 @@ def main(page: ft.Page):
     def open_folder_dialog(folder_path, file_count):
         dataset_name_field.value = ""
         schema_dropdown.value = ""
-        schema_dropdown.options = []  # reset initially
-        schema_dropdown.visible = False  # Hide dropdown initially
+        schema_dropdown.options = []
+        schema_dropdown.visible = False
         page.update()
 
         dlg = ft.AlertDialog(
@@ -274,14 +301,17 @@ def main(page: ft.Page):
                     dataset_name_field,
                     ft.Text("Optionally, standardize each document with a schema below:"),
                     schema_dropdown,
-                    ft.ProgressRing(visible=True),  # indicates we are fetching
+                    ft.ProgressRing(visible=True),  # indicates we are fetching schemas
                 ],
                 spacing=10,
             ),
             actions_alignment=ft.MainAxisAlignment.END,
             actions=[
                 ft.TextButton("Cancel", on_click=lambda e: handle_cancel(dlg, e)),
-                ft.ElevatedButton("Confirm Upload", on_click=lambda e: handle_confirm(dlg, e, folder_path, file_count)),
+                ft.ElevatedButton(
+                    "Confirm Upload",
+                    on_click=lambda e: handle_confirm(dlg, e, folder_path, file_count)
+                ),
             ],
         )
         page.open(dlg)
@@ -290,7 +320,8 @@ def main(page: ft.Page):
             latest_key = get_latest_api_key()
             schemas_fetched = list_schemas(latest_key)
             schema_dropdown.options = [
-                ft.dropdown.Option(key=s.schemaId, text=s.schemaName) for s in schemas_fetched
+                ft.dropdown.Option(key=s.schemaId, text=s.schemaName)
+                for s in schemas_fetched
             ]
             schema_dropdown.visible = True
             dlg.content.controls.pop()  # remove spinner
@@ -300,6 +331,9 @@ def main(page: ft.Page):
 
     def pick_folder_result(e: ft.FilePickerResultEvent):
         if e.path:
+            # Clear previous logs only if starting a new upload
+            clear_progress_text()
+
             folder_path = Path(e.path)
             all_files = list(folder_path.glob("*"))
             file_count = len([f for f in all_files if f.is_file() and not f.name.startswith(".")])
@@ -317,11 +351,7 @@ def main(page: ft.Page):
     # --------------------------------------------------------------------
     chosen_folder_path = None
     folder_text_field = ft.TextField(label="Selected Folder", width=400, read_only=True, visible=False)
-    dataset_dropdown = ft.Dropdown(
-        label="Select a dataset to download",
-        options=[],
-        width=400,
-    )
+    dataset_dropdown = ft.Dropdown(label="Select a dataset to download", options=[], width=400)
 
     def download_folder_result(e: ft.FilePickerResultEvent):
         nonlocal chosen_folder_path
@@ -352,7 +382,7 @@ def main(page: ft.Page):
 
         def do_download():
             show_progress_ui()
-            progress_text.value = "Preparing download..."
+            progress_text.value += "\nStarting download..."
             page.update()
 
             download_dataset(
@@ -370,12 +400,17 @@ def main(page: ft.Page):
         page.close(dialog)
 
     def open_download_dialog(e):
+        # Clear previous logs only if starting a new download
+        clear_progress_text()
+
         dataset_names = list_dataset_names(get_latest_api_key())
         dataset_dropdown.options = [ft.dropdown.Option(name, name) for name in dataset_names]
         dataset_dropdown.value = ""
         folder_text_field.value = ""
+        folder_text_field.visible = False
+
         nonlocal chosen_folder_path
-        chosen_folder_path = None  # reset
+        chosen_folder_path = None
 
         dlg = ft.AlertDialog(
             modal=True,
@@ -419,7 +454,8 @@ def main(page: ft.Page):
             buttons_row,
             loading_indicator,
             progress_bar,
-            progress_text,
+            progress_container,  # The scrollable progress area
+            logs_link,           # Button to open local log file (shown on error)
         ],
         alignment="center",
         visible=False,
