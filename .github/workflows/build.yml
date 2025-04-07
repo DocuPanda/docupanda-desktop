@@ -4,12 +4,10 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
 
 permissions:
-  contents: write  # Allow the workflow to create releases
+  contents: write  # Allows workflow to manage releases/assets
 
 jobs:
   build-windows:
@@ -53,12 +51,13 @@ jobs:
           name: DocuPanda_macOS
           path: DocuPanda_macOS.zip
 
-  create-release:
-    needs: [ build-windows, build-macos ]
+  create-or-update-release:
+    needs: [build-windows, build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # Download artifacts to upload them to the release
       - uses: actions/download-artifact@v4
         with:
           name: DocuPanda_Windows
@@ -69,25 +68,26 @@ jobs:
           name: DocuPanda_macOS
           path: release_assets/
 
-      - name: Set Release Tag
-        id: tag
+      # Delete existing "latest" release and tag if they exist (to overwrite)
+      - name: Delete existing 'latest' release (if exists)
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          else
-            echo "RELEASE_TAG=latest" >> $GITHUB_OUTPUT
+          release_id=$(gh release view latest --json id -q .id || echo "")
+          if [ -n "$release_id" ]; then
+            gh release delete latest --yes
+            git push --delete origin latest || true
           fi
-        shell: bash
 
+      # Create new release tagged as "latest"
       - uses: softprops/action-gh-release@v2
         with:
           draft: false
           prerelease: false
-          tag_name: ${{ steps.tag.outputs.RELEASE_TAG }}
-          name: "DocuPanda ${{ steps.tag.outputs.RELEASE_TAG }}"
+          tag_name: latest
+          name: "DocuPanda latest"
           files: |
             release_assets/DocuPanda_Windows.zip
             release_assets/DocuPanda_macOS.zip
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-
