@@ -2,5 +2,4 @@ build
 dist
 .idea
 config.json
-src/dp_desktop/__pycache__/*
-.idea
+src/dp_desktop/__pycache__/*.idea/
