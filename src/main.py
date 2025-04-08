@@ -412,11 +412,9 @@ def main(page: ft.Page):
         page.close(dialog)
 
     def open_download_dialog(e):
-        # Clear previous logs only if starting a new download
         clear_progress_text()
 
-        dataset_names = list_dataset_names(get_latest_api_key())
-        dataset_dropdown.options = [ft.dropdown.Option(name, name) for name in dataset_names]
+        dataset_dropdown.options = []
         dataset_dropdown.value = ""
         folder_text_field.value = ""
         folder_text_field.visible = False
@@ -424,25 +422,47 @@ def main(page: ft.Page):
         nonlocal chosen_folder_path
         chosen_folder_path = None
 
+        loading_row = ft.Row(
+            controls=[
+                ft.ProgressRing(visible=True),
+                ft.Text("Hang on a second, fetching  dataset names...", italic=True),
+            ],
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+        # Store column in a variable so we can modify it later
+        dialog_column = ft.Column(
+            width=400,
+            controls=[
+                dataset_dropdown,
+                loading_row,
+                ft.ElevatedButton("Select Target Directory", on_click=select_target_directory_click),
+                folder_text_field,
+            ],
+            spacing=20,
+        )
+
         dlg = ft.AlertDialog(
             modal=True,
             title=ft.Text("Download Dataset"),
-            content=ft.Column(
-                width=400,
-                controls=[
-                    dataset_dropdown,
-                    ft.ElevatedButton("Select Target Directory", on_click=select_target_directory_click),
-                    folder_text_field,
-                ],
-                spacing=20,
-            ),
+            content=dialog_column,
             actions_alignment=ft.MainAxisAlignment.END,
             actions=[
                 ft.TextButton("Cancel", on_click=lambda ev: handle_download_cancel(dlg, ev)),
                 ft.ElevatedButton("Confirm Download", on_click=lambda ev: handle_download_confirm(dlg, ev)),
             ],
         )
+
         page.open(dlg)
+
+        def fetch_dataset_names():
+            names = list_dataset_names(get_latest_api_key())
+            dataset_dropdown.options = [ft.dropdown.Option(name, name) for name in names]
+            if loading_row in dialog_column.controls:
+                dialog_column.controls.remove(loading_row)
+            page.update()
+
+        threading.Thread(target=fetch_dataset_names, daemon=True).start()
 
     download_button = ft.ElevatedButton(
         text="Download Dataset Results",
