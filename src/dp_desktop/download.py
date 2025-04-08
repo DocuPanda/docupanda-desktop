@@ -1,11 +1,13 @@
+import concurrent.futures
 import dataclasses
+import json
 import logging
+import threading
 from pathlib import Path
 from typing import Optional, Callable
-import threading
-import requests
-import concurrent.futures
-import json
+
+# Import the retry logic from utils.py
+from dp_desktop.utils import request_with_retries
 
 
 @dataclasses.dataclass
@@ -25,13 +27,11 @@ def download_dataset(
     """
     Download a dataset with progress/error callbacks.
 
-    - Lists the documents in the given dataset (list_documents)
-    - Downloads each doc's PDF and (optionally) standardization data
-    - Logs progress, successes, and errors
-    - Calls progress_callback(docs_completed, total_docs) after each doc finishes
-    - Calls error_callback(doc_label, error_message) on any failure
+    - Uses list_documents() to retrieve the list of documents.
+    - For each document, downloads its OCR URL, then its PDF, and
+      finally any available standardization JSON data.
+    - Progress and errors are reported via the provided callbacks.
     """
-
     logging.info(f"Starting download of dataset='{dataset_name}' to: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -46,12 +46,12 @@ def download_dataset(
     progress_lock = threading.Lock()
     docs_completed = [0]  # mutable reference for closure
 
-    # Initialize callback at 0
+    # Call initial progress callback
     if progress_callback:
         progress_callback(0, total_docs)
 
     def download_single(doc: Document):
-        """Download PDF + standardization data for a single doc."""
+        """Download the PDF and standardization data for a single document."""
         doc_label = f"{doc.filename} ({doc.documentId})"
         logging.info(f"Starting download for: {doc_label}")
 
@@ -60,33 +60,28 @@ def download_dataset(
             "X-API-Key": api_key
         }
         try:
-            # 1) Get a short-lived OCR download URL
+            # 1) Obtain a short-lived OCR download URL using retry logic.
             url = f"https://app.docupanda.io/document/{doc.documentId}/download/ocr-url?hours=6"
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
+            response = request_with_retries("GET", url, headers=headers)
             result = response.json()
             download_url = result.get('url')
             if not download_url:
                 raise RuntimeError("No download URL found in response.")
 
-            # 2) Download the PDF file
-            file_response = requests.get(download_url)
-            file_response.raise_for_status()
+            # 2) Download the PDF file using the retry logic.
+            file_response = request_with_retries("GET", download_url)
             output_path = output_dir / (doc.filename + '.pdf')
             with open(output_path, 'wb') as f:
                 f.write(file_response.content)
-            logging.info(f"Downloaded PDF to: {output_path}")
+            logging.info(f"Downloaded PDF for: {doc_label}")
 
-            # 3) Download standardizations (if any)
+            # 3) Download standardization data (if present) using the retry logic.
             stds_url = (
                 f"https://app.docupanda.io/standardizations"
                 f"?document_id={doc.documentId}&limit=20&offset=0&exclude_payload=false"
             )
-            stds_resp = requests.get(stds_url, headers=headers)
-            stds_resp.raise_for_status()
+            stds_resp = request_with_retries("GET", stds_url, headers=headers)
             stds = stds_resp.json()
-
-            # If there's standardization data, save the first standardization payload
             if stds:
                 std = stds[0]
                 standardization_dict = std.get('data')
@@ -94,23 +89,22 @@ def download_dataset(
                     json_path = output_dir / f"{doc.filename}.json"
                     with open(json_path, 'w') as f:
                         json.dump(standardization_dict, f, indent=2)
-                    logging.info(f"Downloaded standardization JSON to: {json_path}")
+                    logging.info(f"Downloaded standardization JSON for: {doc_label}")
 
             logging.info(f"Finished download for: {doc_label}")
 
         except Exception as e:
-            logging.error(f"Error downloading doc {doc_label}: {e}", exc_info=True)
+            logging.error(f"Error downloading document {doc_label}: {e}", exc_info=True)
             if error_callback:
                 error_callback(doc_label, str(e))
 
         finally:
-            # Update progress, whether success or error
+            # Update progress after each document completes (successfully or not)
             with progress_lock:
                 docs_completed[0] += 1
                 if progress_callback:
                     progress_callback(docs_completed[0], total_docs)
 
-    # Use a thread pool for parallel downloads
     max_workers = 5
     logging.info(f"Creating ThreadPoolExecutor with max_workers={max_workers}")
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -121,7 +115,7 @@ def download_dataset(
 
 def list_documents(api_key: str, dataset_name: str):
     """
-    Query DocuPanda for all documents in a dataset (paginated).
+    List all documents for the specified dataset from DocuPanda (paginated).
     Returns a list of Document objects.
     """
     logging.info(f"Listing all documents for dataset='{dataset_name}'")
@@ -129,7 +123,9 @@ def list_documents(api_key: str, dataset_name: str):
     offset = 0
     all_documents = []
 
-    while True:
+    max_iterations = 500
+
+    for attempt_i in range(max_iterations):
         url = (
             "https://app.docupanda.io/documents"
             f"?dataset={dataset_name}"
@@ -137,15 +133,13 @@ def list_documents(api_key: str, dataset_name: str):
             f"&offset={offset}"
             "&exclude_payload=true"
         )
-
         headers = {
             "accept": "application/json",
             "X-API-Key": api_key
         }
 
         try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
+            response = request_with_retries("GET", url, headers=headers)
             new_documents = response.json()
             if not new_documents:
                 break

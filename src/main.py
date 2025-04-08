@@ -1,8 +1,8 @@
-import sys
-import os
 import json
 import logging
+import os
 import platform
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +12,7 @@ import flet as ft
 from dp_desktop.download import download_dataset
 from dp_desktop.list_objects import list_schemas, list_dataset_names
 from dp_desktop.upload import upload_files
+from dp_desktop.utils import get_files
 
 APP_NAME = "DocuPanda"
 
@@ -52,6 +53,7 @@ logging.basicConfig(
     ],
 )
 
+
 # Ensure uncaught exceptions get logged at CRITICAL level
 def handle_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
@@ -59,27 +61,32 @@ def handle_exception(exc_type, exc_value, exc_traceback):
         return
     logging.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
 
+
 sys.excepthook = handle_exception
+
 
 # Optionally, redirect all print statements to logging as well
 class PrintToLogger(object):
     def __init__(self, level=logging.INFO):
         self._level = level
+
     def write(self, message):
         if message.strip():
             logging.log(self._level, message.strip())
+
     def flush(self):
         pass
 
+
 sys.stdout = PrintToLogger(logging.INFO)
 sys.stderr = PrintToLogger(logging.ERROR)
-
 
 ###############################################################################
 # 2. STANDARD APP CODE
 ###############################################################################
 
 CONFIG_FILE = CONFIG_DIR / "config.json"
+
 
 def load_api_key():
     """Load the API key from our standard config file."""
@@ -92,11 +99,13 @@ def load_api_key():
             print("Error loading config:", e)  # Goes to logs
     return ""
 
+
 def save_api_key(api_key):
     """Save the API key to our standard config file."""
     config = {"api_key": api_key}
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f)
+
 
 def get_latest_api_key():
     key = load_api_key()
@@ -284,7 +293,7 @@ def main(page: ft.Page):
 
         threading.Thread(target=do_upload, daemon=True).start()
 
-    def open_folder_dialog(folder_path, file_count):
+    def open_folder_dialog(folder_path, allowed_count, total_file_count):
         dataset_name_field.value = ""
         schema_dropdown.value = ""
         schema_dropdown.options = []
@@ -296,7 +305,9 @@ def main(page: ft.Page):
             title=ft.Text("Upload Settings"),
             content=ft.Column(
                 controls=[
-                    ft.Text(f"Folder selected: {folder_path}\nDetected {file_count} files."),
+                    ft.Text(
+                        f"Folder selected: {folder_path}\nDetected {total_file_count} files of which {allowed_count} are supported "
+                        f"file types."),
                     ft.Text("Please provide a dataset name (required):"),
                     dataset_name_field,
                     ft.Text("Optionally, standardize each document with a schema below:"),
@@ -310,7 +321,7 @@ def main(page: ft.Page):
                 ft.TextButton("Cancel", on_click=lambda e: handle_cancel(dlg, e)),
                 ft.ElevatedButton(
                     "Confirm Upload",
-                    on_click=lambda e: handle_confirm(dlg, e, folder_path, file_count)
+                    on_click=lambda e: handle_confirm(dlg, e, folder_path, allowed_count)
                 ),
             ],
         )
@@ -335,9 +346,10 @@ def main(page: ft.Page):
             clear_progress_text()
 
             folder_path = Path(e.path)
-            all_files = list(folder_path.glob("*"))
-            file_count = len([f for f in all_files if f.is_file() and not f.name.startswith(".")])
-            open_folder_dialog(folder_path, file_count)
+
+            all_files, allowed_files = get_files(folder_path)
+
+            open_folder_dialog(folder_path, len(allowed_files), len(all_files))
         else:
             show_snackbar("No folder selected.")
 
@@ -455,7 +467,7 @@ def main(page: ft.Page):
             loading_indicator,
             progress_bar,
             progress_container,  # The scrollable progress area
-            logs_link,           # Button to open local log file (shown on error)
+            logs_link,  # Button to open local log file (shown on error)
         ],
         spacing=40,
         alignment="center",

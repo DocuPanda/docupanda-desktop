@@ -5,7 +5,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Optional
 
-import requests
+from dp_desktop.utils import request_with_retries
+
+# Constants for timeouts
+POST_REQUEST_TIMEOUT = 100  # Seconds each POST/GET can wait before timing out
+REQUEST_TIMEOUT = 10  # Seconds each POST/GET can wait before timing out
+POLL_TIMEOUT = 900  # Total seconds to wait for a doc to finish uploading/processing
+POLL_INTERVAL = 5  # Seconds between status checks
 
 
 def upload_files(
@@ -18,39 +24,60 @@ def upload_files(
         max_workers: int = 20
 ):
     """
-    Upload and standardize all files in parallel.
+    Production-grade uploader for large-scale doc ingestion and (optional) standardization.
 
-    - Calls progress_callback(files_completed, total_files) after each file finishes.
-    - Calls error_callback(file_path, error_message) on each failure (if provided),
-      and continues processing the rest of the files.
-    - Writes logs for each step (upload, poll, standardization) at INFO level.
-      Any errors are logged at ERROR level.
+    Features:
+    - Parallel uploads with ThreadPoolExecutor.
+    - Each HTTP request has a hard 10-second timeout to prevent indefinite waiting.
+    - Polling each doc's status is capped at 900 seconds total.
+    - Standardization (if schema_id is provided) also has a 900-second cap.
+    - Detailed logging at each step; every failure is logged at ERROR level.
+    - progress_callback(files_completed, total_files) is called after each successful file.
+    - error_callback(file_path, error_message) is called on each failure if provided.
     """
 
-    # Log the start of upload
-    logging.info(f"Scanning folder: {folder_path}")
+    # For demonstration only – replace with your actual file-discovery logic
+    def get_files(path: Path):
+        all_files = list(path.glob("*"))
+        # Example: we’ll just filter by extension here
+        allowed_extensions = {'.pdf', '.jpg', '.jpeg', '.png', '.txt', '.tiff', '.tif', '.webp'}
+        allowed_files = [f for f in all_files if f.suffix.lower() in allowed_extensions]
+        return all_files, allowed_files
 
-    # Collect permissible files
-    allowed_set = {'.pdf', '.jpg', '.jpeg', '.png', '.txt', '.tiff', '.webp'}
-    all_files = list(folder_path.rglob('*.*'))
-    files = [f for f in all_files if f.suffix.lower() in allowed_set]
+    log = logging.getLogger(__name__)
 
-    total_files = len(files)
-    logging.info(f"Found {len(all_files)} total files, "
-                 f"{total_files} are valid (allowed extensions: {allowed_set}).")
+    # 1) Discover valid files
+    log.info(f"Scanning folder: {folder_path}")
 
-    if total_files == 0:
-        logging.info("No valid files to process; returning early.")
+    allowed_set = {'.pdf', '.jpg', '.jpeg', '.png', '.txt', '.tiff', '.tif', '.webp'}
+
+    all_files, allowed_files = get_files(folder_path)
+    total_files = len(allowed_files)
+
+    log.info(f"Found {len(all_files)} total files; {len(allowed_files)} valid files "
+             f"(allowed extensions: {allowed_set}).")
+
+    if len(allowed_files) == 0:
+        log.info("No valid files to process; returning early.")
         return
 
-    # Let the user/UI know: starting at 0 of total_files
+    # Let the user/UI know we're at 0 of total_files
     if progress_callback:
         progress_callback(0, total_files)
 
+    # 2) Internal function for single-file upload + poll + (optional) standardize
     def _upload_and_standardize_file(file_path: Path):
-        # 1) Encode and POST the file
-        logging.info(f"Starting upload for: {file_path.name}")
+        """Upload a single file, poll for completion, optionally standardize, with robust timeouts."""
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "X-API-Key": api_key
+        }
+
+        # --- (A) Upload step ---
         try:
+            log.info(f"[UPLOAD START] {file_path.name}")
+
             with open(file_path, 'rb') as f:
                 file_contents = base64.b64encode(f.read()).decode()
 
@@ -64,104 +91,141 @@ def upload_files(
                     }
                 }
             }
-            headers = {
-                "accept": "application/json",
-                "content-type": "application/json",
-                "X-API-Key": api_key
-            }
-            response = requests.post(upload_url, json=payload, headers=headers)
-            response.raise_for_status()
 
+            # Use our retry wrapper for POST
+            response = request_with_retries(
+                "POST",
+                upload_url,
+                json=payload,
+                headers=headers,
+                timeout=POST_REQUEST_TIMEOUT,
+                log=log
+            )
             document_id = response.json().get('documentId')
             if not document_id:
-                raise RuntimeError(f"No 'documentId' returned for {file_path.name}")
+                raise RuntimeError(f"No documentId returned for {file_path.name}")
 
-            logging.info(f"Upload success for: {file_path.name}, docId={document_id}")
+            log.info(f"[UPLOAD SUCCESS] {file_path.name}, docId={document_id}")
 
         except Exception as e:
-            logging.error(f"Upload failed for {file_path.name}: {str(e)}", exc_info=True)
-            raise RuntimeError(f"Upload failed for {file_path.name}: {str(e)}") from e
+            msg = f"[UPLOAD FAIL] {file_path.name}: {str(e)}"
+            log.error(msg, exc_info=True)
+            raise RuntimeError(msg) from e
 
-        # 2) Poll until doc status is "completed"
+        # --- (B) Poll for doc to reach "completed" within 900 seconds ---
         try:
             doc_get_url = f"https://app.docupanda.io/document/{document_id}"
-            while True:
-                time.sleep(2)
-                get_resp = requests.get(doc_get_url, headers=headers)
-                get_resp.raise_for_status()
+            start_time = time.time()
+
+            for attempt_i in range(100):
+                if (time.time() - start_time) > POLL_TIMEOUT:
+                    raise RuntimeError(f"Timeout after {POLL_TIMEOUT}s: doc {document_id} never completed.")
+
+                time.sleep(POLL_INTERVAL)
+
+                # Use our retry wrapper for GET
+                get_resp = request_with_retries(
+                    "GET",
+                    doc_get_url,
+                    headers=headers,
+                    timeout=REQUEST_TIMEOUT,
+                    log=log
+                )
                 status = get_resp.json().get('status')
+
                 if status == 'completed':
-                    logging.info(f"Document {file_path.name} (docId={document_id}) has status 'completed'.")
+                    log.info(f"[DOC COMPLETED] {file_path.name}, docId={document_id}")
                     break
                 elif status == 'failed':
-                    logging.error(f"Document {file_path.name} (docId={document_id}) has status 'failed'.")
-                    raise RuntimeError(f"Processing failed for docId={document_id}")
-                # Otherwise keep polling
+                    raise RuntimeError(f"Doc {document_id} failed during processing.")
 
         except Exception as e:
-            logging.error(f"Polling document status failed for {file_path.name}: {str(e)}", exc_info=True)
-            raise RuntimeError(f"Polling document status failed for {file_path.name}: {str(e)}") from e
+            msg = f"[DOC POLL FAIL] {file_path.name}: {str(e)}"
+            log.error(msg, exc_info=True)
+            raise RuntimeError(msg) from e
 
-        # 3) Standardize if schema_id is provided
+        # --- (C) Optionally standardize if schema_id was provided ---
         if schema_id:
-            logging.info(f"Standardizing document {file_path.name} (docId={document_id}) with schema: {schema_id}")
             try:
+                log.info(f"[STANDARDIZE START] {file_path.name}, docId={document_id}, schema={schema_id}")
+
                 std_url = "https://app.docupanda.io/standardize/batch"
                 std_payload = {
                     "documentIds": [document_id],
                     "schemaId": schema_id
                 }
-                std_resp = requests.post(std_url, json=std_payload, headers=headers)
-                std_resp.raise_for_status()
+                std_resp = request_with_retries(
+                    "POST",
+                    std_url,
+                    json=std_payload,
+                    headers=headers,
+                    timeout=REQUEST_TIMEOUT,
+                    log=log
+                )
+                standardization_ids = std_resp.json().get('standardizationIds', [])
+                if not standardization_ids:
+                    raise RuntimeError(f"No standardizationId returned for doc {document_id}.")
+                std_id = standardization_ids[0]
 
-                standardization_ids = std_resp.json().get('standardizationIds')
-                standardization_id = standardization_ids[0] if standardization_ids else None
-                if not standardization_id:
-                    raise RuntimeError(f"No 'standardizationId' returned for {file_path.name}")
+                # (D) Poll for standardization to be "completed" within 900 seconds
+                std_get_url = f"https://app.docupanda.io/standardization/{std_id}"
+                start_time = time.time()
 
-                # 4) Poll for standardization to be "completed"
-                std_get_url = f"https://app.docupanda.io/standardization/{standardization_id}"
-                max_poll_attempts = 50
-                for i in range(max_poll_attempts):
-                    std_get_resp = requests.get(std_get_url, headers=headers)
-                    # If 404, doc might not be ready yet, wait and re-check
+                for attempt_i in range(100):
+                    if (time.time() - start_time) > POLL_TIMEOUT:
+                        raise RuntimeError(
+                            f"Timeout after {POLL_TIMEOUT}s: standardization {std_id} never completed."
+                        )
+
+                    time.sleep(POLL_INTERVAL)
+                    # Use our retry wrapper for GET
+                    std_get_resp = request_with_retries(
+                        "GET",
+                        std_get_url,
+                        headers=headers,
+                        timeout=REQUEST_TIMEOUT,
+                        log=log
+                    )
+                    # If the resource doesn't exist yet, keep polling
                     if std_get_resp.status_code == 404:
-                        time.sleep(10)
                         continue
-                    # Otherwise assume it's done or failed in the background
-                    logging.info(f"Standardization request returned status code={std_get_resp.status_code} for "
-                                 f"{file_path.name}. (Break polling loop)")
+
+                    # Break on any other success code
+                    std_get_resp.raise_for_status()
+                    log.info(f"[STANDARDIZE COMPLETE] docId={document_id}, stdId={std_id}")
                     break
 
-                logging.info(f"Standardization completed for {file_path.name} with schema: {schema_id}")
             except Exception as e:
-                logging.error(f"Standardization failed for {file_path.name}: {str(e)}", exc_info=True)
-                raise RuntimeError(f"Standardization failed for {file_path.name}: {str(e)}") from e
+                msg = f"[STANDARDIZE FAIL] {file_path.name}, docId={document_id}: {str(e)}"
+                log.error(msg, exc_info=True)
+                raise RuntimeError(msg) from e
 
-        return True
+        return True  # Return success to the caller
+
+    # 3) Run all files in parallel
+    log.info(f"Beginning parallel processing of {total_files} files. max_workers={max_workers}")
 
     files_completed = 0
-    logging.info(f"Beginning parallel upload for {total_files} files. max_workers={max_workers}")
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_file = {
-            executor.submit(_upload_and_standardize_file, file_path): file_path
-            for file_path in files
+            executor.submit(_upload_and_standardize_file, f): f for f in allowed_files
         }
 
         for future in as_completed(future_to_file):
             file_path = future_to_file[future]
             try:
-                future.result()  # raises if file failed
+                future.result()  # Raises if any error occurred
                 files_completed += 1
-                logging.info(f"Successfully processed {file_path.name} ({files_completed}/{total_files})")
 
+                log.info(f"[FILE DONE] {file_path.name} ({files_completed}/{total_files})")
                 if progress_callback:
                     progress_callback(files_completed, total_files)
 
             except Exception as e:
-                # We already logged the error above, but let's trigger error_callback too
+                # Already logged, but let UI know if possible
                 if error_callback:
                     error_callback(file_path, str(e))
                 else:
-                    # Fallback: log again if there's no error callback
-                    logging.error(f"Error processing file {file_path.name}: {e}")
+                    log.error(f"[FILE ERROR] {file_path.name}: {e}")
+
+    log.info(f"All tasks completed. Processed={files_completed}, Skipped={total_files - files_completed}.")
