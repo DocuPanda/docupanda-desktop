@@ -19,6 +19,7 @@ def request_with_retries(
         max_retries: int = 10,
         backoff_factor: int = 2,
         max_backoff: int = 600,
+        request_timeout: int = 40,
         statuses_to_retry: Optional[set] = None,
         log: Optional[logging.Logger] = None,
         **kwargs
@@ -35,7 +36,7 @@ def request_with_retries(
     while attempt < max_retries:
         attempt += 1
         try:
-            response = requests.request(method, url, **kwargs)
+            response = requests.request(method, url, **kwargs, timeout=request_timeout)
             if response.status_code in statuses_to_retry:
                 logger.warning(f"Request {method} {url} attempt={attempt} failed with "
                                f"status={response.status_code}. Will retry...")
@@ -68,4 +69,3 @@ def request_with_retries(
             total_sleep_time += sleep_time
 
     raise RuntimeError(f"Request {method} {url} failed after {max_retries} retries with unknown cause.")
-

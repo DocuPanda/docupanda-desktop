@@ -105,7 +105,7 @@ def download_dataset(
                 if progress_callback:
                     progress_callback(docs_completed[0], total_docs)
 
-    max_workers = 5
+    max_workers = 20
     logging.info(f"Creating ThreadPoolExecutor with max_workers={max_workers}")
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         executor.map(download_single, all_documents)
@@ -119,13 +119,14 @@ def list_documents(api_key: str, dataset_name: str):
     Returns a list of Document objects.
     """
     logging.info(f"Listing all documents for dataset='{dataset_name}'")
-    limit = 1000
+    limit = 20000
     offset = 0
     all_documents = []
 
     max_iterations = 500
 
-    for attempt_i in range(max_iterations):
+    for iter_i in range(max_iterations):
+        logging.info(f"Iteration {iter_i + 1} to fetch documents...")
         url = (
             "https://app.docupanda.io/documents"
             f"?dataset={dataset_name}"
