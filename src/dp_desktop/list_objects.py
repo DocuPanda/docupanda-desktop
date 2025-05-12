@@ -4,12 +4,6 @@ from typing import List
 import requests
 
 
-#
-# class Schema(pydantic.BaseModel):
-#     schemaName: str
-#     schemaId: str
-
-# equivalent dataclass object:
 @dataclasses.dataclass
 class Schema:
     schemaName: str
