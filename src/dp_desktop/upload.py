@@ -98,7 +98,7 @@ def upload_files(
                 upload_url,
                 json=payload,
                 headers=headers,
-                timeout=POST_REQUEST_TIMEOUT,
+                request_timeout=POST_REQUEST_TIMEOUT,
                 log=log
             )
             document_id = response.json().get('documentId')
@@ -128,7 +128,7 @@ def upload_files(
                     "GET",
                     doc_get_url,
                     headers=headers,
-                    timeout=REQUEST_TIMEOUT,
+                    request_timeout=REQUEST_TIMEOUT,
                     log=log
                 )
                 status = get_resp.json().get('status')
@@ -159,7 +159,7 @@ def upload_files(
                     std_url,
                     json=std_payload,
                     headers=headers,
-                    timeout=REQUEST_TIMEOUT,
+                    request_timeout=REQUEST_TIMEOUT,
                     log=log
                 )
                 standardization_ids = std_resp.json().get('standardizationIds', [])
@@ -183,7 +183,7 @@ def upload_files(
                         "GET",
                         std_get_url,
                         headers=headers,
-                        timeout=REQUEST_TIMEOUT,
+                        request_timeout=REQUEST_TIMEOUT,
                         log=log
                     )
                     # If the resource doesn't exist yet, keep polling
