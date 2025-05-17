@@ -149,7 +149,7 @@ def upload_files(
             try:
                 log.info(f"[STANDARDIZE START] {file_path.name}, docId={document_id}, schema={schema_id}")
 
-                std_url = "https://app.docupanda.io/standardize/batch"
+                std_url = "https://app.docupipe.ai/v2/standardize/batch"
                 std_payload = {
                     "documentIds": [document_id],
                     "schemaId": schema_id
