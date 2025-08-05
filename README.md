@@ -6,7 +6,7 @@ A simple, user-friendly desktop app to effortlessly upload and download datasets
 
 ## 🚀 What is DocuPanda?
 
-[DocuPanda](https://www.docupanda.io) is a powerful document processing platform that transforms your documents into searchable, structured data:
+[DocuPanda](https://www.docupanda.io) is a powerful document processing platform that transforms your documents into searchable, structured data.
 
 - 🔍 **Searchable PDFs:** Instantly find text using Ctrl+F (Windows/Linux) or Command+F (Mac), thanks to built-in OCR technology.
 - 📦 **Standardized JSON Data:** Extract structured data from your documents based on custom schemas defined at [docupanda.io](https://www.docupanda.io).
